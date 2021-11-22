@@ -5,7 +5,6 @@ BseOfLoader equ 0x1000
 OffsetOfLoader equ 0x00
 
 BaseOfStack equ 0x7c00
-StartBootMessage: db "Hello lyra"
 
 SectorNumOfFat1Start equ 1 ; 紧哎着引导扇区 引导扇区为0 FAT1 扇区为1
 RootDirSectors equ 14 ; 根目录所占扇区数  根目录可容纳224个目录每个目录占32个字节 共7136个字节 每个扇区521字节 7136/512 = 14个扇区
@@ -198,6 +197,7 @@ Odd                     db      0
 
 NoLoaderMessage:        db      "ERROR:No LOADER Found"
 LoaderFileName:         db      "LOADER  BIN",0
+StartBootMessage: db "Hello lyra"
 
 	; 510 - (当前指令地址 - 节首地址)
  	times 510 - ($ - $$) db 0
