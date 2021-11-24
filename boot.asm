@@ -61,7 +61,7 @@ Label_Start:
 ;=======	display on screen : Start Booting......
 
 	mov	ax,	1301h
-	mov	bx,	000fh
+	mov	bx,	008ch
 	mov	dx,	0000h
 	mov	cx,	10
 	push	ax

@@ -69,50 +69,16 @@ Label_Start:
 	mov bp, StartBootMessage
 	int 10h
 
-
 	xor ah, ah
 	xor dl, dl
 	int 13h
-	call DebugPrint
 
-; =================== 读取软盘 ====================
-Func_ReadOneSector:
-	; 保存栈帧
-	push bp
-	mov bp, sp
-
-	sub esp, 2
-	mov byte[bp - 2], cl
-	push bx
-	; 存储每磁道扇区数
-	mov bl, [BPB_SectorsPerTrack]
-	; 逻辑扇区 / 每磁道扇区数 余数存储道ah中 商保存道al中
-	div bl
-	; 磁道内起始扇区是从1开始计算 所以要 + 1
-	inc ah
-	mov cl, ah
-	mov dh, al
-	; 右移一位是柱面号
-	shr al, 1
-	mov ch, al
-	; 与运算是磁头号
-	add dh, 1
-	pop bx
-	mov dl, [BS_DrvNum]
-
-Label_Go_On_Reading:
-	mov ah, 2
-	mov al, byte[bp - 2]
-	int 13h
-	jc Label_Go_On_Reading
-	add esp, 2
-	pop bp
-	ret
 
 ;====================== 搜索 loader.bin ==========================
 ; 新建一个SectorNo 变量 并将值修改为SectorNumOfRootDirStart
 mov word [SectorNo], SectorNumOfRootDirStart
 Label_Search_In_Root_Dir_Begin:
+
 	; a  < b cf = 1, zf = 0; a > b cf = 0 zf = 0; a = b zf = 1 cf = 0
 	cmp word [RootDirSizeForLoop], 0
 	; jz zf = 1 跳转 也就是循环了整个目录还是找不到文件 则继续跳转
@@ -145,12 +111,11 @@ Lable_Search_For_LoaderBin:
 
 Label_Cmp_FileName:
 	cmp cx, 0
-	; jz Lable_FileName_Found
-	push ax
-	pop ax
+	jz Lable_FileName_Found
 	dec cx
 	; 读取一个字节数据放入ax中 SI + 1
 	lodsb
+	mov bp, si
 	; 将文件名称与之前读取的缓冲区对比 若两者相等 跳转到Label_Go_On中进行下个字符的对比 若全部匹配 跳转到Lable_fileName_Found方法中
 	cmp al, byte [es:di]
 	jz Label_Go_On
@@ -158,6 +123,7 @@ Label_Cmp_FileName:
 	jmp Lable_Different
 
 Label_Go_On:
+	; di - 1 匹配下一个字符
 	inc di
 	jmp Label_Cmp_FileName
 
@@ -167,25 +133,90 @@ Lable_Different:
 	; 一条目录项占32个字节 20h = 32 指向下一个目录项	
 	add di, 20h
 	mov si, LoaderFileName
-	jmp Label_Search_In_Root_Dir_Begin
+	; 一直找不到文件的原因: 找不到文件直接跳转到Begin中 然后重新初始化 di 一直循环就一直找不到
+	jmp Lable_Search_For_LoaderBin
 
 Label_Goto_Next_Sector_In_Root_Dir: 
+	call PrintMessage
 	; 扇区 + 1 为读取下个扇区做准备
 	add word [SectorNo], 1
 	jmp Label_Search_In_Root_Dir_Begin
-	
+
+Lable_FileName_Found: 
+	jmp $
+; ================== 文件未找到 ================	
+; 似乎是输出语句编写错误导致一直跳转不过来
 Label_No_LoaderBin: 
 	mov ax, 1301h
+	mov bx, 008ch
 	mov cx, 21
 	mov dx, 0100h
 	push ax
 	mov ax, ds
+	mov es, ax
 	pop ax
-	mov bp, Label_No_LoaderBin
+	mov bp, NoLoaderMessage
 	int 10h
 	jmp $
 
-Lable_FileName_Found: 
+; =================== 读取软盘 ====================
+Func_ReadOneSector:
+	; 保存栈帧
+	push bp
+	mov bp, sp
+	sub esp, 2
+	mov byte[bp - 2], cl
+	push bx
+	; 存储每磁道扇区数
+	mov bl, [BPB_SectorsPerTrack]
+	; 逻辑扇区 / 每磁道扇区数 余数存储道ah中 商保存道al中
+	div bl
+	; 磁道内起始扇区是从1开始计算 所以要 + 1
+	inc ah
+	mov cl, ah
+	mov dh, al
+	; 右移一位是柱面号
+	shr al, 1
+	mov ch, al
+	; 与运算是磁头号
+	and dh, 1
+	pop bx
+	mov dl, [BS_DrvNum]
+
+Label_Go_On_Reading:
+	mov ah, 2
+	mov al, byte[bp - 2]
+	int 13h
+
+	jc Label_Go_On_Reading
+	add esp, 2
+	pop bp
+	ret
+; 是按ASCILL码表输出数字
+PrintMessage:
+	push bp
+	mov bp, sp
+	push ax
+	push bx
+	push cx
+	push dx
+	mov ax, 1301h
+	mov bx, 000fh
+	mov cx, 0400h
+	mov dl, 00h
+	mov cx, 10
+	push ax
+	mov ax, ds
+	mov es, ax
+	pop ax
+	mov bp, StartBootMessage
+	int 10h
+	pop ax
+	pop bx
+	pop cx
+	pop dx
+
+	ret
 
 ;=======        tmp variable
 
@@ -193,30 +224,13 @@ Lable_FileName_Found:
 RootDirSizeForLoop      dw      RootDirSectors
 SectorNo                dw      0
 Odd                     db      0
-
-
-
-; ================== debug 输出 ==================
-DebugPrint:
-	; debug consolo
-	mov ax, 1301h
-	mov bx, 000fh
-	mov dx, 0100h
-	mov cx, 10
-	push ax
-	mov ax, ds
-	mov es, ax
-	pop ax
-	mov bp, DebugMessage
-	int 10h
-	ret
+RowNumber dw  2
 
 ;=======        display messages
 
 NoLoaderMessage:        db      "ERROR:No LOADER Found"
 LoaderFileName:         db      "LOADER  BIN",0
 StartBootMessage: db "Hello lyra"
-DebugMessage: db "debug this"
 
 	; 510 - (当前指令地址 - 节首地址)
  	times 510 - ($ - $$) db 0
