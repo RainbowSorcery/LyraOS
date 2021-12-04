@@ -1,16 +1,21 @@
 ; 基址设置为7c00
 org 0x7c00
 
-BseOfLoader equ 0x1000
+; loader起始地址
+BaseOfLoader equ 0x1000
 OffsetOfLoader equ 0x00
 
 BaseOfStack equ 0x7c00
+
+; 数据分区起始扇区 到数据分区 需要跳过一个MBR 两个FAT 更目录分区 共19个扇区 因为FAT中 前两个FAT项是保留的 并没有在根目录区中存储数据 所以要 - 2 共17个扇区
+SectorBalance equ 17
 
 SectorNumOfFat1Start equ 1 ; 紧哎着引导扇区 引导扇区为0 FAT1 扇区为1
 RootDirSectors equ 14 ; 根目录所占扇区数  根目录可容纳224个目录每个目录占32个字节 共7136个字节 每个扇区521字节 7136/512 = 14个扇区
 
 SectorNumOfRootDirStart equ 19 ; 根目录起始扇区 引导扇区占一个扇区 FAT各占9个扇区 根目录扇区为19
 
+; 数据区位置: 引导区占一个扇区 FAT各占9个扇区 数据区14个 因为前两个FAT表项系统保留 然后在减去两个系统保留簇可以找到文件数据区
 
 jmp short Label_Start
 nop
@@ -90,6 +95,7 @@ Label_Search_In_Root_Dir_Begin:
 	mov es, ax
 	; 根目录数据所加载的地址位置 详情看实模式地址分配图
 	mov bx, 0x8000
+	; ax存储待读磁盘起始扇区
 	mov ax, [SectorNo]
 	; 读取一个扇区
 	mov cl, 1
@@ -137,13 +143,105 @@ Lable_Different:
 	jmp Lable_Search_For_LoaderBin
 
 Label_Goto_Next_Sector_In_Root_Dir: 
-	call PrintMessage
 	; 扇区 + 1 为读取下个扇区做准备
 	add word [SectorNo], 1
 	jmp Label_Search_In_Root_Dir_Begin
 
-Lable_FileName_Found: 
-	jmp $
+Lable_FileName_Found:
+	mov ax, RootDirSectors
+	; and 打成add 复位di指向行第一个
+	and di, 0ffe0h
+	; 1a为文件首簇偏移 偏移 + 段地址找到文件首簇
+	add di, 01ah
+	; cx保存文件首簇
+	mov cx, word [es:di]
+	push cx
+	; 根目录所占扇区 + 一个mbr + 2个FAT + FAT数据项偏移 - 2 因为前两个FAT数据项系统保留 并没有存储数据
+	add cx, ax
+	add cx, SectorBalance
+	; 设置loader加载地址以及偏移
+	mov ax, BaseOfLoader
+	mov es, ax
+	mov bx, OffsetOfLoader
+	mov ax, cx
+
+Label_Go_on_loading_File:
+	push ax
+	push bx
+	mov ah, 0eh
+	mov al, '*'
+	mov bl, 0fh
+	int 10h
+	pop bx
+	pop ax
+
+	mov cl, 1
+	call Func_ReadOneSector
+	pop ax
+	call Func_GetFATEntity
+	cmp ax, 0fffh
+	jz Lable_File_Loaded
+	push ax
+	mov dx, RootDirSectors
+	add ax, dx
+	add ax, SectorBalance
+	add bx, [BPB_BytesPerSector]
+	jmp Label_Go_on_loading_File
+
+Lable_File_Loaded:
+	jmp BaseOfLoader:OffsetOfLoader
+
+; ================= 获取FAT 实体对象 ==========
+; 因为每12bit保存一个FAT项 拼接FAT簇时 只要将地址为偶数8个bit和地址为奇数的四个bit拼接 然后甚于四个bit和下一个地址为偶数的拼接 依次
+Func_GetFATEntity: 
+	; 保存现场
+	push es
+	push bx
+	push ax
+	; 初始化ES
+	mov ax, 00
+	mov es, ax
+	pop ax
+	; 初始化 Odd
+	mov byte [Odd], 0
+	; * 3 / 2 计算FAT表项偏移
+	mov bx, 3
+	; 无符号乘法 相乘的两个数 要么是8位 要么是16位 ax * bx 存储到ax中
+	; ax = ax * 3 相当于FAT表项 * 3 
+	mul bx
+	; ax / bx 商ax 余数 dx 然后 / 2
+	div bx
+	; 判断余数的奇偶项 也就是判断FAT表项的奇偶项
+	cmp dx, 0
+	jz Label_Even
+	mov byte [Odd], 1
+	
+Label_Even:
+	xor dx, dx
+	mov bx, [BPB_BytesPerSector]
+	;  CHS计算
+	div bx
+	push dx
+	mov bx, 8000h
+	add ax, SectorNumOfFat1Start
+	; 因为1.5个字节存储两个扇区文件 可能跨扇区存储 所以要读取两个扇区
+	mov cl, 2
+	call Func_ReadOneSector
+
+	pop dx
+	add bx, dx
+	mov ax, [es:bx]
+	cmp byte[Odd], 1
+	jnz Label_Event_2
+	shr ax, 4
+
+Label_Event_2:
+	and ax, 0fffh
+	pop bx
+	pop es
+	ret
+
+
 ; ================== 文件未找到 ================	
 ; 似乎是输出语句编写错误导致一直跳转不过来
 Label_No_LoaderBin: 
@@ -193,30 +291,6 @@ Label_Go_On_Reading:
 	pop bp
 	ret
 ; 是按ASCILL码表输出数字
-PrintMessage:
-	push bp
-	mov bp, sp
-	push ax
-	push bx
-	push cx
-	push dx
-	mov ax, 1301h
-	mov bx, 000fh
-	mov cx, 0400h
-	mov dl, 00h
-	mov cx, 10
-	push ax
-	mov ax, ds
-	mov es, ax
-	pop ax
-	mov bp, StartBootMessage
-	int 10h
-	pop ax
-	pop bx
-	pop cx
-	pop dx
-
-	ret
 
 ;=======        tmp variable
 
