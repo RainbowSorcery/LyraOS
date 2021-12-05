@@ -198,6 +198,7 @@ Label_Go_On_Loading_File:
 	jmp	Label_Go_On_Loading_File
 
 Label_File_Loaded:
+	jmp BaseOfLoader:OffsetOfLoader
 	
 	jmp	$
 

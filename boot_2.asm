@@ -175,11 +175,12 @@ Label_Go_on_loading_File:
 	pop bx
 	pop ax
 
+	; 读取的扇区不对 导致死循环
 	mov cl, 1
 	call Func_ReadOneSector
 	pop ax
 	call Func_GetFATEntity
-	cmp ax, 0fffh
+	cmp ax, 0xfff
 	jz Lable_File_Loaded
 	push ax
 	mov dx, RootDirSectors
@@ -210,6 +211,8 @@ Func_GetFATEntity:
 	; ax = ax * 3 相当于FAT表项 * 3 
 	mul bx
 	; ax / bx 商ax 余数 dx 然后 / 2
+	; 忘了设置寄存器 / 2 
+	mov bx, 2
 	div bx
 	; 判断余数的奇偶项 也就是判断FAT表项的奇偶项
 	cmp dx, 0
