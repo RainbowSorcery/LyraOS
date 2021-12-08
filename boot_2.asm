@@ -166,6 +166,7 @@ Lable_FileName_Found:
 	mov ax, cx
 
 Label_Go_on_loading_File:
+	; 每读取一个扇区 打印输出一次
 	push ax
 	push bx
 	mov ah, 0eh
@@ -177,19 +178,26 @@ Label_Go_on_loading_File:
 
 	; 读取的扇区不对 导致死循环
 	mov cl, 1
+	
 	call Func_ReadOneSector
 	pop ax
+	; 获取下个FAT项
 	call Func_GetFATEntity
+	; 如果下一个FAT项为0xfff表示到文件末尾了
 	cmp ax, 0xfff
+	; 跳转至loader内存地址
 	jz Lable_File_Loaded
 	push ax
+	; 和之前一样根目录所占扇区 + 一个mbr + 2个FAT + FAT数据项偏移 - 2 计算文件簇的扇区
 	mov dx, RootDirSectors
 	add ax, dx
 	add ax, SectorBalance
 	add bx, [BPB_BytesPerSector]
+	; 继续读取下一个扇区
 	jmp Label_Go_on_loading_File
 
 Lable_File_Loaded:
+	; 跳转至 boot内存
 	jmp BaseOfLoader:OffsetOfLoader
 
 ; ================= 获取FAT 实体对象 ==========
@@ -205,16 +213,16 @@ Func_GetFATEntity:
 	pop ax
 	; 初始化 Odd
 	mov byte [Odd], 0
-	; * 3 / 2 计算FAT表项偏移
+	; ax * 3 / 2 也就是 * 1.5 根据是否有余数来判断fat项在偶数地址还是在奇数地址 根据地址的不同 进行不同的处理 余数为FAT项如FAT[0] FAT[1]中的0和1 商为FAT项偏移 相当于 + 1.5 找到下个目标簇的偏移 之后根据奇偶位进行计算下一簇
 	mov bx, 3
 	; 无符号乘法 相乘的两个数 要么是8位 要么是16位 ax * bx 存储到ax中
 	; ax = ax * 3 相当于FAT表项 * 3 
 	mul bx
 	; ax / bx 商ax 余数 dx 然后 / 2
-	; 忘了设置寄存器 / 2 
+	; 忘了设置寄存器 / 2  
 	mov bx, 2
 	div bx
-	; 判断余数的奇偶项 也就是判断FAT表项的奇偶项
+	; 判断是否有余数 若有余数读0.5个字节 若无余数读1个字节
 	cmp dx, 0
 	jz Label_Even
 	mov byte [Odd], 1
@@ -222,23 +230,30 @@ Func_GetFATEntity:
 Label_Even:
 	xor dx, dx
 	mov bx, [BPB_BytesPerSector]
-	;  CHS计算
+	; 在将fat项 / 512 计算出要读取的fat扇区的分区 余数为在fat项中的便宜
 	div bx
 	push dx
+	; 放入内存地址
 	mov bx, 8000h
+	; 将fat扇区的分区 + 1个boot分区计算出要读取的扇区
 	add ax, SectorNumOfFat1Start
 	; 因为1.5个字节存储两个扇区文件 可能跨扇区存储 所以要读取两个扇区
 	mov cl, 2
 	call Func_ReadOneSector
 
 	pop dx
+	; bx + dx fat项偏移 + 读取的扇区地址
 	add bx, dx
+	; 获取fat项簇
 	mov ax, [es:bx]
 	cmp byte[Odd], 1
+	; 如果是奇数地址 右移四位取低12bit
 	jnz Label_Event_2
+	; 之后为了解决错位的问题 右移四位 
 	shr ax, 4
 
 Label_Event_2:
+	; 如果是偶数地址 取高12bit
 	and ax, 0fffh
 	pop bx
 	pop es
